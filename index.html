@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#020617" />
+  <title>Geodetic GNSS Tactical Surveyor OS</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  
+  <!-- Proj4js (Koordinatalar konvertatsiyasi uchun) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.2/proj4.js"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;800&family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap');
+    * { font-family: 'Plus Jakarta Sans', sans-serif; }
+    .mono { font-family: 'JetBrains Mono', monospace; }
+    body { -webkit-tap-highlight-color: transparent; }
+    .map-box { height: 320px; width: 100%; border-radius: 1rem; z-index: 10; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col justify-between select-none">
+
+  <!-- ================= 1. LOGIN INTERFEYSI ================= -->
+  <div id="login-view" class="flex-1 flex items-center justify-center p-4">
+    <div class="w-full max-w-md bg-slate-900 border border-emerald-500/20 p-6 rounded-3xl shadow-2xl backdrop-blur-xl relative">
+      <div class="text-center mb-6">
+        <div class="inline-flex p-3 bg-emerald-500/10 text-emerald-400 rounded-2xl mb-3 border border-emerald-500/30">
+          <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2v4m0 12v4M2 12h4m12 0h4m-3.172-6.828l-2.828 2.828m-8 8l-2.828 2.828m0-13.656l2.828 2.828m8 8l2.828 2.828M12 7a5 5 0 100 10 5 5 0 000-10z" />
+          </svg>
+        </div>
+        <h1 class="text-xl font-black text-white tracking-wide">GNSS SURVEYOR PRO</h1>
+        <p class="text-xs text-slate-400 mt-1 uppercase font-bold tracking-wider">Muhandislik Geodeziya Tizimi</p>
+      </div>
+
+      <form id="login-form" onsubmit="event.preventDefault(); handleLogin();" class="space-y-4">
+        <div>
+          <label class="block text-[11px] font-bold text-slate-400 uppercase mb-1">Foydalanuvchi</label>
+          <input type="text" id="login-input" placeholder="Aziz2b yoki Odil1b" required 
+                 class="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-white text-sm focus:outline-none focus:border-emerald-500 transition-all" />
+        </div>
+        <div>
+          <label class="block text-[11px] font-bold text-slate-400 uppercase mb-1">Parol</label>
+          <input type="password" id="password-input" placeholder="••••••••" required 
+                 class="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-white text-sm focus:outline-none focus:border-emerald-500 transition-all" />
+        </div>
+        
+        <p id="login-error" class="text-rose-400 text-xs text-center hidden font-bold">Login yoki parol noto'g'ri!</p>
+        
+        <button type="submit" 
+                class="w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 active:scale-98 text-slate-950 font-black rounded-xl text-xs uppercase tracking-wider transition-all shadow-lg shadow-emerald-500/20">
+          Tizimga Kirish
+        </button>
+      </form>
+
+      <!-- Tezkor kirish tugmalari (Telefonda terib o'tirmaslik uchun) -->
+      <div class="mt-6 pt-4 border-t border-slate-800 text-center">
+        <span class="text-[10px] uppercase tracking-wider text-slate-500 font-bold block mb-2">Tezkor Sinov Kirishi:</span>
+        <div class="grid grid-cols-2 gap-2">
+          <button type="button" onclick="quickLogin('Aziz2b', 'Aziz2026!')" class="py-2 bg-slate-800 hover:bg-slate-700 text-xs font-bold text-emerald-400 rounded-lg border border-emerald-500/20 active:scale-95 transition-all">
+            👤 Aziz2b
+          </button>
+          <button type="button" onclick="quickLogin('Odil1b', 'Odil2026!')" class="py-2 bg-slate-800 hover:bg-slate-700 text-xs font-bold text-sky-400 rounded-lg border border-sky-500/20 active:scale-95 transition-all">
+            👤 Odil1b
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 2. ASOSIY SURVEYOR HUD ================= -->
+  <div id="app-view" class="flex-1 flex-col hidden">
+    <header class="bg-slate-900 border-b border-slate-800 sticky top-0 z-50 px-4 py-2.5 flex items-center justify-between">
+      <div class="flex items-center space-x-2.5">
+        <div class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
+        <div>
+          <span class="text-xs font-black uppercase text-emerald-400 block leading-none" id="user-display">OPERATOR</span>
+          <span class="text-[9px] text-slate-400 mono font-semibold" id="sys-time">00:00:00</span>
+        </div>
+      </div>
+      <button onclick="handleLogout()" class="px-3 py-1.5 text-xs font-bold bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-lg active:scale-95">
+        Chiqish
+      </button>
+    </header>
+
+    <nav class="flex border-b border-slate-800 bg-slate-900">
+      <button onclick="switchTab('tab1')" id="btn-tab1" class="flex-1 py-3 text-center text-xs font-black border-b-2 border-emerald-500 text-emerald-400">
+        📍 1-BO'LIM: TELEMETRIYA
+      </button>
+      <button onclick="switchTab('tab2')" id="btn-tab2" class="flex-1 py-3 text-center text-xs font-black border-b-2 border-transparent text-slate-400">
+        📐 2-BO'LIM: MAYDON O'LCHASH
+      </button>
+    </nav>
+
+    <main class="flex-1 p-3.5 max-w-3xl w-full mx-auto space-y-3.5">
+      <!-- 1-BO'LIM: TELEMETRIYA -->
+      <section id="section-tab1" class="space-y-3.5">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl">
+          <div class="flex items-center justify-between border-b border-slate-800 pb-2 mb-3">
+            <span class="text-[11px] font-black uppercase text-slate-400">GNSS Signal:</span>
+            <span id="accuracy-badge" class="text-[10px] px-2.5 py-0.5 rounded-full font-bold bg-slate-800 text-slate-400">
+              Qidirilmoqda...
+            </span>
+          </div>
+
+          <div class="grid grid-cols-3 gap-2 text-center">
+            <div class="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+              <span class="text-[9px] text-slate-400 block uppercase font-bold">Aniqlik</span>
+              <span id="stat-accuracy" class="text-sm font-black mono text-emerald-400">--</span>
+            </div>
+            <div class="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+              <span class="text-[9px] text-slate-400 block uppercase font-bold">Balandlik H</span>
+              <span id="stat-altitude" class="text-sm font-black mono text-white">--</span>
+            </div>
+            <div class="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+              <span class="text-[9px] text-slate-400 block uppercase font-bold">Tezlik</span>
+              <span id="stat-speed" class="text-sm font-black mono text-amber-400">--</span>
+            </div>
+          </div>
+
+          <button onclick="startAveraging()" id="btn-calibrate" class="w-full mt-3 py-3 bg-emerald-500 hover:bg-emerald-400 active:scale-98 rounded-xl font-extrabold text-xs uppercase text-slate-950 transition-all">
+            🎯 10-O'lchov O'rtachasi bilan Tinchlantirish
+          </button>
+        </div>
+
+        <div id="map-detektor" class="map-box border border-slate-800"></div>
+
+        <div class="space-y-2">
+          <!-- WGS84 -->
+          <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 flex items-center justify-between">
+            <div>
+              <span class="text-[10px] font-black text-emerald-400 uppercase">WGS-84</span>
+              <p id="coord-wgs-dd" class="text-xs font-bold mono text-slate-200">B: -- , L: --</p>
+            </div>
+            <button onclick="copyText('coord-wgs-dd')" class="p-2 bg-slate-800 rounded-lg text-xs font-bold">Nusxa</button>
+          </div>
+          <!-- UTM -->
+          <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 flex items-center justify-between">
+            <div>
+              <span class="text-[10px] font-black text-sky-400 uppercase" id="coord-utm-title">UTM Standart</span>
+              <p id="coord-utm-val" class="text-xs font-bold mono text-slate-200">X: -- , Y: --</p>
+            </div>
+            <button onclick="copyText('coord-utm-val')" class="p-2 bg-slate-800 rounded-lg text-xs font-bold">Nusxa</button>
+          </div>
+          <!-- SK-42 -->
+          <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 flex items-center justify-between">
+            <div>
+              <span class="text-[10px] font-black text-indigo-400 uppercase" id="coord-sk42-title">SK-42 (Gauss-Krüger)</span>
+              <p id="coord-sk42-val" class="text-xs font-bold mono text-slate-200">X: -- , Y: --</p>
+            </div>
+            <button onclick="copyText('coord-sk42-val')" class="p-2 bg-slate-800 rounded-lg text-xs font-bold">Nusxa</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2-BO'LIM: MAYDON O'LCHASH -->
+      <section id="section-tab2" class="space-y-3.5 hidden">
+        <div id="map-survey" class="map-box border border-slate-800"></div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <button onclick="addSurveyPoint()" class="py-3 bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-slate-950 font-black rounded-xl text-xs uppercase">
+            📍 Nuqta Urish
+          </button>
+          <button onclick="finishPolygon()" class="py-3 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-black rounded-xl text-xs uppercase">
+            🏁 Poligonni Yopish
+          </button>
+          <button onclick="undoPoint()" class="py-2.5 bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 font-bold rounded-xl text-xs">
+            ↩ Oxirgisini Qaytarish
+          </button>
+          <button onclick="resetSurvey()" class="py-2.5 bg-rose-950 hover:bg-rose-900 text-rose-300 active:scale-95 font-bold rounded-xl text-xs">
+            🗑 Tozalash
+          </button>
+        </div>
+
+        <!-- Natijalar -->
+        <div id="results-panel" class="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl space-y-3 hidden">
+          <span class="text-xs font-black text-emerald-400 uppercase">Maydon Natijalari (Gauss)</span>
+          <div class="grid grid-cols-3 gap-2 text-center">
+            <div class="bg-slate-950 p-2 rounded-xl border border-slate-800">
+              <span class="text-[9px] text-slate-400 block font-bold">Kvadrat Metr</span>
+              <span id="res-m2" class="text-xs font-black mono text-white">0 m²</span>
+            </div>
+            <div class="bg-slate-950 p-2 rounded-xl border border-slate-800">
+              <span class="text-[9px] text-slate-400 block font-bold">Sotix</span>
+              <span id="res-sotix" class="text-xs font-black mono text-emerald-400">0</span>
+            </div>
+            <div class="bg-slate-950 p-2 rounded-xl border border-slate-800">
+              <span class="text-[9px] text-slate-400 block font-bold">Gektar</span>
+              <span id="res-ga" class="text-xs font-black mono text-sky-400">0 ga</span>
+            </div>
+          </div>
+          <div class="text-xs flex justify-between px-1">
+            <span class="text-slate-400">Perimetr:</span>
+            <span id="res-perimeter" class="font-bold mono text-white">0 m</span>
+          </div>
+          <div class="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800">
+            <button onclick="exportGeoJSON()" class="py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-bold">GeoJSON Yuklash</button>
+            <button onclick="exportKML()" class="py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-bold">KML Yuklash</button>
+          </div>
+        </div>
+
+        <!-- Nuqtalar ro'yxati -->
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-3">
+          <span class="text-[10px] font-bold text-slate-400 uppercase block mb-1">Nuqtalar (<span id="points-count">0</span>)</span>
+          <div class="max-h-28 overflow-y-auto">
+            <table class="w-full text-left text-[11px] mono">
+              <thead class="text-slate-500 border-b border-slate-800">
+                <tr><th>№</th><th>B, L</th><th class="text-right">Aniqlik</th></tr>
+              </thead>
+              <tbody id="points-table-body" class="divide-y divide-slate-800 text-slate-300"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- 3. FOOTER -->
+    <footer class="py-3 border-t border-slate-900 bg-slate-950 text-center text-xs text-slate-500 tracking-wider font-semibold">
+      Powered by Azizbek Toirov
+    </footer>
+  </div>
+
+  <div id="toast" class="fixed top-12 left-1/2 -translate-x-1/2 bg-emerald-400 text-slate-950 font-black px-4 py-2 rounded-xl text-xs opacity-0 transition-opacity pointer-events-none z-[999]">
+    Muvaffaqiyatli!
+  </div>
+
+  <!-- ================= BARCHA ISHCHI SKRIPTLAR ================= -->
+  <script>
+    const VALID_USERS = {
+      'Aziz2b': 'Aziz2026!',
+      'Odil1b': 'Odil2026!'
+    };
+
+    let currentUser = localStorage.getItem('geo_active_user');
+    let currentPosition = null;
+    let watchId = null;
+
+    let mapDetector = null, markerDetector = null, circleDetector = null;
+    let mapSurvey = null, surveyMarkers = [], surveyLine = null, surveyPolygon = null;
+    let surveyPoints = [];
+
+    // Sahifa yuklanganda sessiya tekshiruvi
+    window.addEventListener('DOMContentLoaded', () => {
+      setInterval(() => {
+        document.getElementById('sys-time').innerText = new Date().toTimeString().split(' ')[0];
+      }, 1000);
+
+      if (currentUser && VALID_USERS[currentUser]) {
+        showApp(currentUser);
+      }
+    });
+
+    function quickLogin(user, pass) {
+      document.getElementById('login-input').value = user;
+      document.getElementById('password-input').value = pass;
+      handleLogin();
+    }
+
+    function handleLogin() {
+      const u = document.getElementById('login-input').value.trim();
+      const p = document.getElementById('password-input').value.trim();
+      const err = document.getElementById('login-error');
+
+      if (VALID_USERS[u] && VALID_USERS[u] === p) {
+        localStorage.setItem('geo_active_user', u);
+        err.classList.add('hidden');
+        showApp(u);
+      } else {
+        err.classList.remove('hidden');
+      }
+    }
+
+    function handleLogout() {
+      localStorage.removeItem('geo_active_user');
+      if (watchId) navigator.geolocation.clearWatch(watchId);
+      location.reload();
+    }
+
+    function showApp(user) {
+      document.getElementById('login-view').classList.add('hidden');
+      document.getElementById('app-view').classList.remove('hidden');
+      document.getElementById('app-view').classList.add('flex');
+      document.getElementById('user-display').innerText = user;
+
+      initMaps();
+      startGNSS();
+    }
+
+    function switchTab(tabId) {
+      const tab1 = document.getElementById('section-tab1');
+      const tab2 = document.getElementById('section-tab2');
+      const btn1 = document.getElementById('btn-tab1');
+      const btn2 = document.getElementById('btn-tab2');
+
+      if (tabId === 'tab1') {
+        tab1.classList.remove('hidden');
+        tab2.classList.add('hidden');
+        btn1.className = "flex-1 py-3 text-center text-xs font-black border-b-2 border-emerald-500 text-emerald-400";
+        btn2.className = "flex-1 py-3 text-center text-xs font-black border-b-2 border-transparent text-slate-400";
+        setTimeout(() => mapDetector && mapDetector.invalidateSize(), 200);
+      } else {
+        tab1.classList.add('hidden');
+        tab2.classList.remove('hidden');
+        btn2.className = "flex-1 py-3 text-center text-xs font-black border-b-2 border-emerald-500 text-emerald-400";
+        btn1.className = "flex-1 py-3 text-center text-xs font-black border-b-2 border-transparent text-slate-400";
+        setTimeout(() => mapSurvey && mapSurvey.invalidateSize(), 200);
+      }
+    }
+
+    function initMaps() {
+      if (mapDetector) return;
+      const def = [41.311081, 69.240562];
+
+      mapDetector = L.map('map-detektor', { attributionControl: false }).setView(def, 16);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(mapDetector);
+
+      mapSurvey = L.map('map-survey', { attributionControl: false }).setView(def, 16);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(mapSurvey);
+    }
+
+    function startGNSS() {
+      if (!('geolocation' in navigator)) return;
+
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          currentPosition = pos.coords;
+          renderTelemetry(pos.coords);
+        },
+        (err) => {
+          const b = document.getElementById('accuracy-badge');
+          b.className = "text-[10px] px-2.5 py-0.5 rounded-full font-bold bg-rose-500/20 text-rose-400";
+          b.innerText = "GPS O'chiq yoki Ruxsat Berilmadi";
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      );
+    }
+
+    function renderTelemetry(coords) {
+      const acc = coords.accuracy ? coords.accuracy.toFixed(1) : '--';
+      const alt = coords.altitude !== null ? coords.altitude.toFixed(1) + ' m' : '--';
+      const speed = coords.speed !== null ? (coords.speed * 3.6).toFixed(1) + ' km/h' : '0.0';
+
+      document.getElementById('stat-accuracy').innerText = `±${acc}m`;
+      document.getElementById('stat-altitude').innerText = alt;
+      document.getElementById('stat-speed').innerText = speed;
+
+      const badge = document.getElementById('accuracy-badge');
+      if (coords.accuracy <= 4) {
+        badge.className = "text-[10px] px-2.5 py-0.5 rounded-full font-bold bg-emerald-500/20 text-emerald-400";
+        badge.innerText = "A'lo Aniqlik";
+      } else if (coords.accuracy <= 10) {
+        badge.className = "text-[10px] px-2.5 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-400";
+        badge.innerText = "O'rtacha Aniqlik";
+      } else {
+        badge.className = "text-[10px] px-2.5 py-0.5 rounded-full font-bold bg-rose-500/20 text-rose-400";
+        badge.innerText = "Past Aniqlik";
+      }
+
+      const latLng = [coords.latitude, coords.longitude];
+      if (!markerDetector) {
+        markerDetector = L.circleMarker(latLng, { radius: 7, fillColor: '#10b981', color: '#fff', weight: 2, fillOpacity: 1 }).addTo(mapDetector);
+        circleDetector = L.circle(latLng, { radius: coords.accuracy, color: '#10b981', weight: 1, fillOpacity: 0.15 }).addTo(mapDetector);
+        mapDetector.setView(latLng, 18);
+      } else {
+        markerDetector.setLatLng(latLng);
+        circleDetector.setLatLng(latLng);
+        circleDetector.setRadius(coords.accuracy);
+      }
+
+      updateCoords(coords.latitude, coords.longitude);
+    }
+
+    function updateCoords(lat, lon) {
+      document.getElementById('coord-wgs-dd').innerText = `B: ${lat.toFixed(7)}° , L: ${lon.toFixed(7)}°`;
+
+      const utmZone = Math.floor((lon + 180) / 6) + 1;
+      const utmDef = `+proj=utm +zone=${utmZone} +datum=WGS84 +units=m +no_defs`;
+      const utm = proj4(proj4.defs('EPSG:4326'), utmDef, [lon, lat]);
+      document.getElementById('coord-utm-title').innerText = `UTM (Zona ${utmZone}N)`;
+      document.getElementById('coord-utm-val').innerText = `X: ${utm[0].toFixed(2)} m , Y: ${utm[1].toFixed(2)} m`;
+
+      const skZone = Math.floor(lon / 6) + 1;
+      const cm = skZone * 6 - 3;
+      const skProjDef = `+proj=tmerc +lat_0=0 +lon_0=${cm} +k=1 +x_0=${skZone * 1000000 + 500000} +y_0=0 +ellps=krass +
