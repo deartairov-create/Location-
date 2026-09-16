@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#020617" />
+  <title>GNSS Surveyor & Maydon O'lchash</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  
+  <!-- Proj4js (Koordinatalar konvertatsiyasi uchun) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.2/proj4.js"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;800&family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap');
+    * { font-family: 'Plus Jakarta Sans', sans-serif; }
+    .mono { font-family: 'JetBrains Mono', monospace; }
+    body { -webkit-tap-highlight-color: transparent; }
+    .map-box { height: 320px; width: 100%; border-radius: 1rem; z-index: 10; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col justify-between select-none">
+
+  <!-- ASOSIY DASTUR EKRANI (To'g'ridan-to'g'ri ochiladi) -->
+  <div class="flex-1 flex flex-col">
+    <!-- Yuqori panel -->
+    <header class="bg-slate-900 border-b border-slate-800 sticky top-0 z-50 px-4 py-2.5 flex items-center justify-between">
+      <div class="flex items-center space-x-2.5">
+        <div class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
+        <div>
+          <span class="text-xs font-black uppercase text-emerald-400 block leading-none">GNSS SURVEYOR PRO</span>
+          <span class="text-[9px] text-slate-400 mono font-semibold" id="sys-time">00:00:00</span>
+        </div>
+      </div>
+      <div class="text-[11px] font-bold text-slate-400 bg-slate-800 px-3 py-1 rounded-lg border border-slate-700">
+        GPS Dala Tizimi
+      </div>
+    </header>
+
+    <!-- Navigatsiya tablari -->
+    <nav class="flex border-b border-slate-800 bg-slate-900">
+      <button onclick="switchTab('tab1')" id="btn-tab1" class="flex-1 py-3 text-center text-xs font-black border-b-2 border-emerald-500 text-emerald-400">
+        📍 1-BO'LIM: GPS DETEKTOR
+      </button>
+      <button onclick="switchTab('tab2')" id="btn-tab2" class="flex-1 py-3 text-center text-xs font-black border-b-2 border-transparent text-slate-400">
+        📐 2-BO'LIM: MAYDON O'LCHASH
+      </button>
+    </nav>
+
+    <!-- Asosiy mazmun -->
+    <main class="flex-1 p-3.5 max-w-3xl w-full mx-auto space-y-3.5">
+      
+      <!-- ================= 1-BO'LIM: GPS DETEKTOR ================= -->
+      <section id="section-tab1" class="space-y-3.5">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl">
+          <div class="flex items-center justify-between border-b border-slate-800 pb-2 mb-3">
+            <span class="text-[11px] font-black uppercase text-slate-400">GNSS Signali:</span>
+            <span id="accuracy-badge" class="text-[10px] px-2.5 py-0.5 rounded-full font-bold bg-slate-800 text-slate-400">
+              Qidirilmoqda...
+            </span>
+          </div>
+
+          <div class="grid grid-cols-3 gap-2 text-center">
+            <div class="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+              <span class="text-[9px] text-slate-400 block uppercase font-bold">Aniqlik</span>
+              <span id="stat-accuracy" class="text-sm font-black mono text-emerald-400">--</span>
+            </div>
+            <div class="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+              <span class="text-[9px] text-slate-400 block uppercase font-bold">Balandlik H</span>
+              <span id="stat-altitude" class="text-sm font-black mono text-white">--</span>
+            </div>
+            <div class="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+              <span class="text-[9px] text-slate-400 block uppercase font-bold">Tezlik</span>
+              <span id="stat-speed" class="text-sm font-black mono text-amber-400">--</span>
+            </div>
+          </div>
+
+          <button onclick="startAveraging()" id="btn-calibrate" class="w-full mt-3 py-3.5 bg-emerald-500 hover:bg-emerald-400 active:scale-98 rounded-xl font-black text-xs uppercase text-slate-950 transition-all shadow-lg shadow-emerald-500/20">
+            🎯 10-O'lchov O'rtachasi Bilan Tinchlantirish
+          </button>
+        </div>
+
+        <div id="map-detektor" class="map-box border border-slate-800 shadow-lg"></div>
+
+        <!-- Koordinata Tizimlari -->
+        <div class="space-y-2">
+          <!-- WGS-84 -->
+          <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 flex items-center justify-between">
+            <div>
+              <span class="text-[10px] font-black text-emerald-400 uppercase">WGS-84 (Geodezik)</span>
+              <p id="coord-wgs-dd" class="text-xs font-bold mono text-slate-200 mt-0.5">B: -- , L: --</p>
+              <p id="coord-wgs-dms" class="text-[11px] mono text-slate-400">--</p>
+            </div>
+            <button onclick="copyText('coord-wgs-dd')" class="p-2.5 bg-slate-800 hover:bg-slate-700 active:scale-95 rounded-lg text-xs font-bold">Nusxa</button>
+          </div>
+          <!-- UTM -->
+          <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 flex items-center justify-between">
+            <div>
+              <span class="text-[10px] font-black text-sky-400 uppercase" id="coord-utm-title">UTM Standart</span>
+              <p id="coord-utm-val" class="text-xs font-bold mono text-slate-200 mt-0.5">X: -- , Y: --</p>
+            </div>
+            <button onclick="copyText('coord-utm-val')" class="p-2.5 bg-slate-800 hover:bg-slate-700 active:scale-95 rounded-lg text-xs font-bold">Nusxa</button>
+          </div>
+          <!-- SK-42 -->
+          <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 flex items-center justify-between">
+            <div>
+              <span class="text-[10px] font-black text-indigo-400 uppercase" id="coord-sk42-title">SK-42 Gauss-Krüger</span>
+              <p id="coord-sk42-val" class="text-xs font-bold mono text-slate-200 mt-0.5">X: -- , Y: --</p>
+            </div>
+            <button onclick="copyText('coord-sk42-val')" class="p-2.5 bg-slate-800 hover:bg-slate-700 active:scale-95 rounded-lg text-xs font-bold">Nusxa</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= 2-BO'LIM: MAYDON O'LCHASH ================= -->
+      <section id="section-tab2" class="space-y-3.5 hidden">
+        <div id="map-survey" class="map-box border border-slate-800 shadow-lg"></div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <button onclick="addSurveyPoint()" class="py-3.5 bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-slate-950 font-black rounded-xl text-xs uppercase shadow-lg shadow-emerald-500/20">
+            📍 Nuqta Urish
+          </button>
+          <button onclick="finishPolygon()" class="py-3.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-black rounded-xl text-xs uppercase shadow-lg shadow-indigo-600/20">
+            🏁 Maydonni Yopish
+          </button>
+          <button onclick="undoPoint()" class="py-2.5 bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 font-bold rounded-xl text-xs">
+            ↩ Oxirgisini O'chirish
+          </button>
+          <button onclick="resetSurvey()" class="py-2.5 bg-rose-950 hover:bg-rose-900 active:scale-95 text-rose-300 font-bold rounded-xl text-xs">
+            🗑 Tozalash
+          </button>
+        </div>
+
+        <!-- O'lchov Natijalari -->
+        <div id="results-panel" class="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl space-y-3 hidden">
+          <span class="text-xs font-black text-emerald-400 uppercase">Maydon Natijalari (Gauss)</span>
+          <div class="grid grid-cols-3 gap-2 text-center">
+            <div class="bg-slate-950 p-2 rounded-xl border border-slate-800">
+              <span class="text-[9px] text-slate-400 block font-bold">Kvadrat Metr</span>
+              <span id="res-m2" class="text-xs font-black mono text-white">0 m²</span>
+            </div>
+            <div class="bg-slate-950 p-2 rounded-xl border border-slate-800">
+              <span class="text-[9px] text-slate-400 block font-bold">Sotix</span>
+              <span id="res-sotix" class="text-xs font-black mono text-emerald-400">0</span>
+            </div>
+            <div class="bg-slate-950 p-2 rounded-xl border border-slate-800">
+              <span class="text-[9px] text-slate-400 block font-bold">Gektar</span>
+              <span id="res-ga" class="text-xs font-black mono text-sky-400">0 ga</span>
+            </div>
+          </div>
+          
+          <div class="bg-slate-950 p-2 rounded-xl border border-slate-800 flex justify-between items-center text-xs">
+            <span class="text-slate-400 font-bold">Umumiy Perimetr:</span>
+            <span id="res-perimeter" class="font-bold mono text-emerald-400 text-sm">0.00 m</span>
+          </div>
+
+          <div class="space-y-1">
+            <span class="text-[10px] font-bold text-slate-400 uppercase block">Qovurg'alar Uzunligi:</span>
+            <div id="edges-list" class="max-h-24 overflow-y-auto space-y-1 text-xs mono text-slate-300 pr-1"></div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800">
+            <button onclick="exportGeoJSON()" class="py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-bold">📥 GeoJSON Yuklash</button>
+            <button onclick="exportKML()" class="py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-bold">📥 KML Yuklash</button>
+          </div>
+        </div>
+
+        <!-- Nuqtalar ro'yxati -->
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-3">
+          <span class="text-[10px] font-bold text-slate-400 uppercase block mb-1">Nuqtalar Ro'yxati (<span id="points-count">0</span>)</span>
+          <div class="max-h-28 overflow-y-auto">
+            <table class="w-full text-left text-[11px] mono">
+              <thead class="text-slate-500 border-b border-slate-800">
+                <tr><th>№</th><th>B, L</th><th class="text-right">Aniqlik</th></tr>
+              </thead>
+              <tbody id="points-table-body" class="divide-y divide-slate-800 text-slate-300"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="py-3 border-t border-slate-900 bg-slate-950 text-center text-xs text-slate-500 tracking-wider font-semibold">
+      Powered by Azizbek Toirov
+    </footer>
+  </div>
+
+  <div id="toast" class="fixed top-12 left-1/2 -translate-x-1/2 bg-emerald-400 text-slate-950 font-black px-4 py-2 rounded-xl text-xs opacity-0 transition-opacity pointer-events-none z-[999]">
+    Muvaffaqiyatli!
+  </div>
+
+  <!-- ================= BARCHA ISHCHI SKRIPTLAR ================= -->
+  <script>
+    var currentPosition = null;
+    var watchId = null;
+
+    var mapDetector = null, markerDetector = null, circleDetector = null;
+    var mapSurvey = null, surveyMarkers = [], surveyLine = null, surveyPolygon = null;
+    var surveyPoints = [];
+
+    window.addEventListener('DOMContentLoaded', function() {
+      setInterval(function() {
+        document.getElementById('sys-time').innerText = new Date().toTimeString().split(' ')[0];
+      }, 1000);
+
+      initMaps();
+      startGNSS();
+    });
+
+    function switchTab(tabId) {
+      var tab1 = document.getElementById('section-tab1');
+      var tab2 = document.getElementById('section-tab2');
+      var btn1 = document.getElementById('btn-tab1');
+      var btn2 = document.getElementById('btn-tab2');
+
+      if (tabId === 'tab1') {
+        tab1.classList.remove('hidden');
+        tab2.classList.add('hidden');
+        btn1.className = "flex-1 py-3 text-center text-xs font-black border-b-2 border-emerald-500 text-emerald-400";
+        btn2.className = "flex-1 py-3 text-center text-xs font-black border-b-2 border-transparent text-slate-400";
+        setTimeout(function() { if (mapDetector) mapDetector.invalidateSize(); }, 200);
+      } else {
+        tab1.classList.add('hidden');
+        tab2.classList.remove('hidden');
+        btn2.className = "flex-1 py-3 text-center text-xs font-black border-b-2 border-emerald-500 text-emerald-400";
+        btn1.className = "flex-1 py-3 text-center text-xs font-black border-b-2 border-transparent text-slate-400";
+        setTimeout(function() { if (mapSurvey) mapSurvey.invalidateSize(); }, 200);
+      }
+    }
+
+    function initMaps() {
+      if (mapDetector) return;
+      var def = [41.311081, 69.240562];
+
+      mapDetector = L.map('map-detektor', { attributionControl: false }).setView(def, 16);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(mapDetector);
+
+      mapSurvey = L.map('map-survey', { attributionControl: false }).setView(def, 16);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(mapSurvey);
+    }
+
+    function startGNSS() {
+      if (!('geolocation' in navigator)) return;
+
+      watchId = navigator.geolocation.watchPosition(
+        function(pos) {
+          currentPosition = pos.coords;
+          renderTelemetry(pos.coords);
+        },
+        function(err) {
+          var b = document.getElementById('accuracy-badge');
+          b.className = "text-[10px] px-2.5 py-0.5 rounded-full font-bold bg-rose-500/20 text-rose-400";
+          b.innerText = "GPS O'chiq yoki Ruxsat Yo'q";
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      );
+    }
+
+    function renderTelemetry(coords) {
+      var acc = coords.accuracy ? coords.accuracy.toFixed(1) : '--';
+      var alt = coords.altitude !== null ? coords.altitude.toFixed(1) + ' m' : '--';
+      var speed = coords.speed !== null ? (coords.speed * 3.6).toFixed(1) + ' km/h' : '0.0';
+
+      document.getElementById('stat-accuracy').innerText = '±' + acc + 'm';
+      document.getElementById('stat-altitude').innerText = alt;
+      document.getElementById('stat-speed').innerText = speed;
+
+      var badge = document.getElementById('accuracy-badge');
+      if (coords.accuracy <= 4) {
+        badge.className = "text-[10px] px-2.5 py-0.5 rounded-full font-bold bg-emerald-500/20 text-emerald-400";
+        badge.innerText = "A'lo Aniqlik";
+      } else if (coords.accuracy <= 10) {
+        badge.className = "text-[10px] px-2.5 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-400";
+        badge.innerText = "O'rtacha Aniqlik";
+      } else {
+        badge.className = "text-[10px] px-2.5 py-0.5 rounded-full font-bold bg-rose-500/20 text-rose-400";
+        badge.innerText = "Past Aniqlik";
+      }
+
+      var latLng = [coords.latitude, coords.longitude];
+      if (!markerDetector) {
+        markerDetector = L.circleMarker(latLng, { radius: 7, fillColor: '#10b981', color: '#fff', weight: 2, fillOpacity: 1 }).addTo(mapDetector);
+        circleDetector = L.circle(latLng, { radius: coords.accuracy, color: '#10b981', weight: 1, fillOpacity: 0.15 }).addTo(mapDetector);
+        mapDetector.setView(latLng, 18);
+      } else {
+        markerDetector.setLatLng(latLng);
+        circleDetector.setLatLng(latLng);
+        circleDetector.setRadius(coords.accuracy);
+      }
+
+      updateCoords(coords.latitude, coords.longitude);
+    }
+
+    function updateCoords(lat, lon) {
+      document.getElementById('coord-wgs-dd').innerText = 'B: ' + lat.toFixed(7) + '° , L: ' + lon.toFixed(7) + '°';
+      document.getElementById('coord-wgs-dms').innerText = toDMS(lat, 'lat') + ', ' + toDMS(lon, 'lon');
+
+      var utmZone = Math.floor((lon + 180) / 6) + 1;
+      var utmDef = '+proj=utm +zone=' + utmZone + ' +datum=WGS84 +units=m +no_defs';
+      var utm = proj4(proj4.defs('EPSG:4326'), utmDef, [lon, lat]);
+      document.getElementById('coord-utm-title').innerText = 'UTM (Zona ' + utmZone + 'N)';
+      document.getElementById('coord-utm-val').innerText = 'X: ' + utm[0].toFixed(2) + ' m , Y: ' + utm[1].toFixed(2) + ' m';
+
+      var skZone = Math.floor(lon / 6) + 1;
+      var cm = skZone * 6 - 3;
+      var skProjDef = '+proj=tmerc +lat_0=0 +lon_0=' + cm + ' +k=1 +x_0=' + (skZone * 1000000 + 500000) + ' +y_0=0 +ellps=krass +towgs84=23.57,-140.95,-79.8,0,0.35,0.79,-0.22 +units=m +no_defs';
+      var sk42 = proj4(proj4.defs('EPSG:4326'), skProjDef, [lon, lat]);
+      document.getElementById('coord-sk42-title').innerText = 'SK-42 (' + skZone + '-zona)';
+      document.getElementById('coord-sk42-val').innerText = 'X: ' + sk42[0].toFixed(2) + ' m , Y: ' + sk42[1].toFixed(2) + ' m';
+    }
+
+    function toDMS(val, type) {
+      var abs = Math.abs(val);
+      var d = Math.floor(abs);
+      var m = Math.floor((abs - d) * 60);
+      var s = ((abs - d - m / 60) * 3600).toFixed(2);
+      var dir = type === 'lat' ? (val >= 0 ? 'N' : 'S') : (val >= 0 ? 'E' : 'W');
+      return d + '°' + m + "'" + s + '"' + dir;
+    }
+
+    function startAveraging() {
+      var btn = document.getElementById('btn-calibrate');
+      btn.innerText = "⏳ 10 ta o'lchov to'planmoqda...";
+      var samples = [];
+      var count = 0;
+      var interval = setInterval(function() {
+        if (currentPosition) {
+          samples.push({ lat: currentPosition.latitude, lon: currentPosition.longitude, acc: currentPosition.accuracy });
+          count++;
+          if (count >= 10) {
+            clearInterval(interval);
+            var wSum = 0, sumLat = 0, sumLon = 0;
+            samples.forEach(function(s) {
+              var w = 1 / (s.acc || 1);
+              sumLat += s.lat * w;
+              sumLon += s.lon * w;
+              wSum += w;
+            });
+            updateCoords(sumLat / wSum, sumLon / wSum);
+            btn.innerText = "✅ Tinchlantirildi!";
+            setTimeout(function() { btn.innerText = "🎯 10-O'lchov O'rtachasi Bilan Tinchlantirish"; }, 2000);
+          }
+        }
+      }, 300);
+    }
+
+    function addSurveyPoint() {
+      if (!currentPosition) {
+        alert("GPS signali hali aniqlanmadi!");
+        return;
+      }
+      var lat = currentPosition.latitude;
+      var lng = currentPosition.longitude;
+      var acc = currentPosition.accuracy;
+
+      var utmZone = Math.floor((lng + 180) / 6) + 1;
+      var utm = proj4(proj4.defs('EPSG:4326'), '+proj=utm +zone=' + utmZone + ' +datum=WGS84 +units=m +no_defs', [lng, lat]);
+
+      surveyPoints.push({ lat: lat, lng: lng, acc: acc, utmX: utm[0], utmY: utm[1] });
+
+      var m = L.circleMarker([lat, lng], { radius: 6, fillColor: '#10b981', color: '#fff', weight: 2, fillOpacity: 1 }).addTo(mapSurvey);
+      surveyMarkers.push(m);
+
+      redrawPath();
+      updateTable();
+    }
+
+    function undoPoint() {
+      if (surveyPoints.length === 0) return;
+      surveyPoints.pop();
+      var m = surveyMarkers.pop();
+      if (m) mapSurvey.removeLayer(m);
+      redrawPath();
+      updateTable();
+      document.getElementById('results-panel').classList.add('hidden');
+    }
+
+    function resetSurvey() {
+      if (!confirm("Barcha nuqtalar o'chirilsinmi?")) return;
+      surveyPoints = [];
+      surveyMarkers.forEach(function(m) { mapSurvey.removeLayer(m); });
+      surveyMarkers = [];
+      if (surveyLine) mapSurvey.removeLayer(surveyLine);
+      if (surveyPolygon) mapSurvey.removeLayer(surveyPolygon);
+      surveyLine = null;
+      surveyPolygon = null;
+      updateTable();
+      document.getElementById('results-panel').classList.add('hidden');
+    }
+
+    function redrawPath() {
+      var coords = surveyPoints.map(function(p) { return [p.lat, p.lng]; });
+      if (surveyLine) mapSurvey.removeLayer(surveyLine);
+      if (surveyPolygon) mapSurvey.removeLayer(surveyPolygon);
+      if (coords.length > 1) {
+        surveyLine = L.polyline(coords, { color: '#38bdf8', weight: 3, dashArray: '4,4' }).addTo(mapSurvey);
+        mapSurvey.fitBounds(surveyL
